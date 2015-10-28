@@ -946,7 +946,7 @@ NFCSTATUS phTmlNfc_IoCtl(phTmlNfc_ControlCode_t eControlCode)
 ** Returns          None
 **
 *******************************************************************************/
-void phTmlNfc_DeferredCall(uintptr_t dwThreadId, phLibNfc_Message_t *ptWorkerMsg)
+void phTmlNfc_DeferredCall(uint32_t dwThreadId, phLibNfc_Message_t *ptWorkerMsg)
 {
     intptr_t bPostStatus;
     UNUSED(dwThreadId);

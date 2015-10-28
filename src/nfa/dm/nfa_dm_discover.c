@@ -15,8 +15,25 @@
  *  limitations under the License.
  *
  ******************************************************************************/
-
-
+/******************************************************************************
+ *
+ *  The original Work has been changed by NXP Semiconductors.
+ *
+ *  Copyright (C) 2013-2014 NXP Semiconductors
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ ******************************************************************************/
 /******************************************************************************
  *
  *  This file contains the action functions for device manager discovery
@@ -35,10 +52,18 @@
 #endif
 #include "nfa_rw_int.h"
 
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
 #include "nfc_int.h"
+#include "nci_hmsgs.h"
+#include<config.h>
+#endif
 /*
 **  static functions
 */
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+static BOOLEAN reconnect_in_progress;
+static BOOLEAN is_emvco_active;
+#endif
 
 static UINT8 nfa_dm_get_rf_discover_config (tNFA_DM_DISC_TECH_PROTO_MASK dm_disc_mask,
                                             tNFC_DISCOVER_PARAMS disc_params[],
@@ -59,6 +84,7 @@ static char *nfa_dm_disc_state_2_str (UINT8 state);
 static char *nfa_dm_disc_event_2_str (UINT8 event);
 #endif
 
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
 typedef struct nfa_dm_p2p_prio_logic
 {
     UINT8            isodep_detected; /*flag to check if ISO-DEP is detected */
@@ -69,6 +95,10 @@ typedef struct nfa_dm_p2p_prio_logic
 
 static nfa_dm_p2p_prio_logic_t p2p_prio_logic_data;
 
+#define P2P_RESUME_POLL_TIMEOUT 16 /*mili second timeout value*/
+static UINT16 P2P_PRIO_LOGIC_CLEANUP_TIMEOUT = 50; /*timeout value 500 ms for p2p_prio_logic_cleanup*/
+#endif
+BOOLEAN etsi_reader_in_progress = FALSE;
 /*******************************************************************************
 **
 ** Function         nfa_dm_get_rf_discover_config
@@ -271,6 +301,69 @@ static UINT8 nfa_dm_get_rf_discover_config (tNFA_DM_DISC_TECH_PROTO_MASK dm_disc
     return num_params;
 }
 
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+/*******************************************************************************
+**
+** Function         nfa_dm_get_sak
+**
+** Description      provides the proper sak value based on nfcee id present and
+**                  HOST configuration.
+**
+** Returns          NFA_STATUS_OK if success
+**
+*******************************************************************************/
+static UINT8 nfa_dm_get_sak(tNFA_DM_DISC_TECH_PROTO_MASK tech_proto_mask)
+{
+    UINT8 sak = 0;
+    UINT8 tech_list = 0;
+    unsigned long hostEnable = TRUE, fwdEnable = TRUE;
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    if ((GetNumValue(NAME_HOST_LISTEN_ENABLE, &hostEnable, sizeof(hostEnable))))
+    {
+        NFA_TRACE_DEBUG2 ("%s:HOST_LISTEN_ENABLE=0x0%lu;", __FUNCTION__, hostEnable);
+    }
+    if((GetNumValue(NAME_NXP_FWD_FUNCTIONALITY_ENABLE, &fwdEnable, sizeof(fwdEnable))))
+    {
+        NFA_TRACE_DEBUG2 ("%s:NXP_FWD_FUNCTIONALITY_ENABLE=0x0%lu;", __FUNCTION__, fwdEnable);
+    }
+#endif
+
+    tech_list = nfa_ee_get_supported_tech_list(0x02);
+    if(hostEnable)
+    {
+        if(!fwdEnable && (tech_list == NFA_TECHNOLOGY_MASK_B))
+        {
+            sak = 0x00;
+        }
+        else
+        {
+            if (tech_proto_mask & NFA_DM_DISC_MASK_LA_ISO_DEP)
+            {
+                sak |= NCI_PARAM_SEL_INFO_ISODEP;
+            }
+            if (tech_proto_mask & NFA_DM_DISC_MASK_LA_NFC_DEP)
+            {
+                sak |= NCI_PARAM_SEL_INFO_NFCDEP;
+            }
+        }
+    }
+    else
+    {
+        if(tech_list == NFA_TECHNOLOGY_MASK_B)
+        {
+            sak = 0x00;
+        }
+        else if (tech_proto_mask & NFA_DM_DISC_MASK_LA_NFC_DEP)
+        {
+            sak |= NCI_PARAM_SEL_INFO_ISODEP;
+            sak |= NCI_PARAM_SEL_INFO_NFCDEP;
+        }
+    }
+
+    return sak;
+}
+#endif
+
 /*******************************************************************************
 **
 ** Function         nfa_dm_set_rf_listen_mode_config
@@ -296,7 +389,7 @@ static tNFA_STATUS nfa_dm_set_rf_listen_mode_config (tNFA_DM_DISC_TECH_PROTO_MAS
     ** ISO-DEP listen LA_PROT 0x01, LB_PROT 0x01
     ** NFC-DEP listen LA_PROT 0x02, LF_PROT 0x02
     */
-
+    p = params;
     if (tech_proto_mask & NFA_DM_DISC_MASK_LA_T1T)
     {
         platform = NCI_PARAM_PLATFORM_T1T;
@@ -307,6 +400,7 @@ static tNFA_STATUS nfa_dm_set_rf_listen_mode_config (tNFA_DM_DISC_TECH_PROTO_MAS
     }
     else
     {
+#if(NFC_NXP_NOT_OPEN_INCLUDED == FALSE)
         if (tech_proto_mask & NFA_DM_DISC_MASK_LA_ISO_DEP)
         {
             sens_info |= NCI_PARAM_SEL_INFO_ISODEP;
@@ -316,9 +410,20 @@ static tNFA_STATUS nfa_dm_set_rf_listen_mode_config (tNFA_DM_DISC_TECH_PROTO_MAS
         {
             sens_info |= NCI_PARAM_SEL_INFO_NFCDEP;
         }
+#else
+        sens_info = nfa_dm_get_sak(tech_proto_mask);
+        NFA_TRACE_DEBUG2 ("%s: sens_info=0x0%x;", __FUNCTION__, sens_info);
+#endif
     }
-
-    p = params;
+#if (NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    /*
+     * SEL_INFO will be updated irrespective of UICC/eSE is selected or not
+     * This is required for P2P to work if UICC/ESE selected
+     * */
+    UINT8_TO_STREAM (p, NFC_PMID_LA_SEL_INFO);
+    UINT8_TO_STREAM (p, NCI_PARAM_LEN_LA_SEL_INFO);
+    UINT8_TO_STREAM (p, sens_info);
+#endif
 
     /*
     ** for Listen A
@@ -335,9 +440,11 @@ static tNFA_STATUS nfa_dm_set_rf_listen_mode_config (tNFA_DM_DISC_TECH_PROTO_MAS
         UINT8_TO_STREAM (p, NFC_PMID_LA_PLATFORM_CONFIG);
         UINT8_TO_STREAM (p, NCI_PARAM_LEN_LA_PLATFORM_CONFIG);
         UINT8_TO_STREAM (p, platform);
+#if (NFC_NXP_NOT_OPEN_INCLUDED != TRUE)
         UINT8_TO_STREAM (p, NFC_PMID_LA_SEL_INFO);
         UINT8_TO_STREAM (p, NCI_PARAM_LEN_LA_SEL_INFO);
         UINT8_TO_STREAM (p, sens_info);
+#endif
     }
     else /* Let NFCC use UICC configuration by configuring with length = 0 */
     {
@@ -345,8 +452,10 @@ static tNFA_STATUS nfa_dm_set_rf_listen_mode_config (tNFA_DM_DISC_TECH_PROTO_MAS
         UINT8_TO_STREAM (p, 0);
         UINT8_TO_STREAM (p, NFC_PMID_LA_PLATFORM_CONFIG);
         UINT8_TO_STREAM (p, 0);
+#if (NFC_NXP_NOT_OPEN_INCLUDED != TRUE)
         UINT8_TO_STREAM (p, NFC_PMID_LA_SEL_INFO);
         UINT8_TO_STREAM (p, 0);
+#endif
         UINT8_TO_STREAM (p, NFC_PMID_LA_NFCID1);
         UINT8_TO_STREAM (p, 0);
         UINT8_TO_STREAM (p, NFC_PMID_LA_HIST_BY);
@@ -381,19 +490,53 @@ static tNFA_STATUS nfa_dm_set_rf_listen_mode_config (tNFA_DM_DISC_TECH_PROTO_MAS
         UINT8_TO_STREAM (p, 0);
     }
 
+#if (NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    /** SEL_INFO will be updated irrespective of UICC/eSE is selected or not
+     *  This is required for P2P to work if UICC/ESE selected
+    **/
+        UINT8_TO_STREAM (p, NFC_PMID_LF_PROTOCOL);
+        UINT8_TO_STREAM (p, NCI_PARAM_LEN_LF_PROTOCOL);
+        if (tech_proto_mask & NFA_DM_DISC_MASK_LF_NFC_DEP)
+        {
+            UINT8_TO_STREAM (p, NCI_LISTEN_PROTOCOL_NFC_DEP);
+        }
+        else
+        {
+            UINT8_TO_STREAM (p, 0x00);
+        }
+#endif
+
     /* for Listen F */
-    /* NFCC can support NFC-DEP and T3T listening based on NFCID routing regardless of NFC-F tech routing */
-    UINT8_TO_STREAM (p, NFC_PMID_LF_PROTOCOL);
-    UINT8_TO_STREAM (p, NCI_PARAM_LEN_LF_PROTOCOL);
-    if ((tech_proto_mask & NFA_DM_DISC_MASK_LF_NFC_DEP) &&
-        !nfa_dm_is_p2p_paused() )
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    if (nfa_dm_cb.disc_cb.listen_RT[NFA_DM_DISC_LRT_NFC_F] == NFA_DM_DISC_HOST_ID_DH)
     {
-        UINT8_TO_STREAM (p, NCI_LISTEN_PROTOCOL_NFC_DEP);
+#endif
+        /* NFCC can support NFC-DEP and T3T listening based on NFCID routing regardless of NFC-F tech routing */
+        UINT8_TO_STREAM (p, NFC_PMID_LF_PROTOCOL);
+        UINT8_TO_STREAM (p, NCI_PARAM_LEN_LF_PROTOCOL);
+        if ((tech_proto_mask & NFA_DM_DISC_MASK_LF_NFC_DEP) &&
+            !nfa_dm_is_p2p_paused() )
+        {
+            UINT8_TO_STREAM (p, NCI_LISTEN_PROTOCOL_NFC_DEP);
+        }
+        else
+        {
+            UINT8_TO_STREAM (p, 0x00);
+        }
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
     }
     else
     {
-        UINT8_TO_STREAM (p, 0x00);
+        /* If DH is not listening on T3T, let NFCC use UICC configuration by configuring with length = 0 */
+        if ((tech_proto_mask & NFA_DM_DISC_MASK_LF_T3T) == 0)
+        {
+            UINT8_TO_STREAM (p, NFC_PMID_LF_PROTOCOL);
+            UINT8_TO_STREAM (p, 0);
+            UINT8_TO_STREAM (p, NFC_PMID_LF_T3T_FLAGS2);
+            UINT8_TO_STREAM (p, 0);
+        }
     }
+#endif
 
     if (p > params)
     {
@@ -566,9 +709,11 @@ static void nfa_dm_set_rf_listen_mode_raw_config (tNFA_DM_DISC_TECH_PROTO_MASK *
             }
         }
 
+#if (NFC_NXP_NOT_OPEN_INCLUDED != TRUE)
         UINT8_TO_STREAM (p,  NFC_PMID_LF_T3T_PMM);
         UINT8_TO_STREAM (p,  NCI_PARAM_LEN_LF_T3T_PMM);
         ARRAY_TO_STREAM (p,  p_cfg->lf_t3t_pmm, NCI_PARAM_LEN_LF_T3T_PMM);
+#endif
 
         nfa_dm_check_set_config ((UINT8) (p - params), params, FALSE);
 
@@ -892,8 +1037,20 @@ static tNFC_STATUS nfa_dm_disc_force_to_idle (void)
 static void nfa_dm_disc_deact_ntf_timeout_cback (TIMER_LIST_ENT *p_tle)
 {
     NFA_TRACE_ERROR0 ("nfa_dm_disc_deact_ntf_timeout_cback()");
-
-    nfa_dm_disc_force_to_idle();
+#if (NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    if (nfc_cb.num_disc_maps == 1)
+    {
+    NFC_TRACE_ERROR0 ("reset Nfc..!!");
+    etsi_reader_in_progress = TRUE;
+    nfc_ncif_cmd_timeout();
+    }
+    else
+    {
+#endif
+        nfa_dm_disc_force_to_idle();
+#if (NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    }
+#endif
 }
 
 /*******************************************************************************
@@ -912,6 +1069,9 @@ static tNFC_STATUS nfa_dm_send_deactivate_cmd (tNFC_DEACT_TYPE deactivate_type)
 {
     tNFC_STATUS status = NFC_STATUS_SEMANTIC_ERROR;
     tNFA_DM_DISC_FLAGS w4_flags = nfa_dm_cb.disc_cb.disc_flags & (NFA_DM_DISC_FLAGS_W4_RSP|NFA_DM_DISC_FLAGS_W4_NTF);
+#if (NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    unsigned long num = 0;
+#endif
 
     if (!w4_flags)
     {
@@ -923,7 +1083,30 @@ static tNFC_STATUS nfa_dm_send_deactivate_cmd (tNFC_DEACT_TYPE deactivate_type)
         if (!nfa_dm_cb.disc_cb.tle.in_use)
         {
             nfa_dm_cb.disc_cb.tle.p_cback = (TIMER_CBACK *)nfa_dm_disc_deact_ntf_timeout_cback;
+#if (NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+            num = NFA_DM_DISC_TIMEOUT_W4_DEACT_NTF;
+            NFA_TRACE_DEBUG1("num_disc_maps=%d",nfc_cb.num_disc_maps);
+            if (nfc_cb.num_disc_maps == 1)
+            {
+                NFA_TRACE_DEBUG1("Reading NAME_NFA_DM_DISC_NTF_TIMEOUT val   "
+                        "nfc_cb.num_disc_maps = %d", nfc_cb.num_disc_maps);
+                if ( GetNumValue ( NAME_NFA_DM_DISC_NTF_TIMEOUT, &num, sizeof ( num ) ) )
+                {
+                    num *= 1000;
+                }
+                else
+                {
+                    num = NFA_DM_DISC_TIMEOUT_W4_DEACT_NTF;
+                    NFA_TRACE_DEBUG1("Overriding NFA_DM_DISC_NTF_TIMEOUT to use %d", num);
+                }
+            }
+            NFA_TRACE_DEBUG1("Starting timer value %d", num);
+            /*wait infinite time for deactivate NTF, if the timeout is configured to 0*/
+            if(num != 0)
+                nfa_sys_start_timer (&nfa_dm_cb.disc_cb.tle, 0, num);
+#else
             nfa_sys_start_timer (&nfa_dm_cb.disc_cb.tle, 0, NFA_DM_DISC_TIMEOUT_W4_DEACT_NTF);
+#endif
         }
     }
     else
@@ -959,6 +1142,8 @@ void nfa_dm_start_rf_discover (void)
     tNFC_DISCOVER_PARAMS    disc_params[NFA_DM_MAX_DISC_PARAMS];
     tNFA_DM_DISC_TECH_PROTO_MASK dm_disc_mask = 0, poll_mask, listen_mask;
     UINT8                   num_params, xx;
+    unsigned long           fwdEnable = FALSE, hostEnable =FALSE;
+    UINT8                   tech_list = 0;
 
     NFA_TRACE_DEBUG0 ("nfa_dm_start_rf_discover ()");
     /* Make sure that RF discovery was enabled, or some app has exclusive control */
@@ -985,7 +1170,7 @@ void nfa_dm_start_rf_discover (void)
             if (nfa_dm_cb.disc_cb.entry[xx].in_use)
             {
                 poll_mask = (nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask & NFA_DM_DISC_MASK_POLL);
-
+                NFA_TRACE_DEBUG2 ("requested_disc_mask = 0x%x, xx=%d", nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask, xx);
                 /* clear poll mode technolgies and protocols which are already used by others */
                 poll_mask &= ~(dm_disc_mask & NFA_DM_DISC_MASK_POLL);
 
@@ -1014,18 +1199,20 @@ void nfa_dm_start_rf_discover (void)
                     listen_mask |= (nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask  & NFA_DM_DISC_MASK_LA_NFC_DEP);
                     listen_mask |= (nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask  & NFA_DM_DISC_MASK_LAA_NFC_DEP);
                 }
+                NFA_TRACE_DEBUG1 ("listen_mask value after NFC-A = 0x%x", listen_mask);
 
                 /* NFC-B */
                 /* multiple hosts can listen ISO-DEP based on AID routing */
                 listen_mask |= nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask
                                & NFA_DM_DISC_MASK_LB_ISO_DEP;
+                NFA_TRACE_DEBUG1 ("listen_mask value after NFC-B = 0x%x", listen_mask);
 
                 /* NFC-F */
-                /* NFCC can support NFC-DEP and T3T listening based on NFCID routing regardless of NFC-F tech routing */
                 listen_mask |= nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask
                                & ( NFA_DM_DISC_MASK_LF_T3T
                                   |NFA_DM_DISC_MASK_LF_NFC_DEP
                                   |NFA_DM_DISC_MASK_LFA_NFC_DEP );
+                NFA_TRACE_DEBUG1 ("listen_mask value after NFC-F = 0x%x", listen_mask);
 
                 /* NFC-B Prime */
                 if (nfa_dm_cb.disc_cb.entry[xx].host_id == nfa_dm_cb.disc_cb.listen_RT[NFA_DM_DISC_LRT_NFC_BP])
@@ -1033,12 +1220,13 @@ void nfa_dm_start_rf_discover (void)
                     listen_mask |= nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask
                                    & NFA_DM_DISC_MASK_L_B_PRIME;
                 }
-
+                NFA_TRACE_DEBUG1 ("listen_mask value after NFC-B Prime = 0x%x", listen_mask);
                 /*
                 ** clear listen mode technolgies and protocols which are already used by others
                 */
 
                 /* Check if other modules are listening T1T or T2T */
+                NFA_TRACE_DEBUG1 ("dm_disc_mask = 0x%x", dm_disc_mask);
                 if (dm_disc_mask & (NFA_DM_DISC_MASK_LA_T1T|NFA_DM_DISC_MASK_LA_T2T))
                 {
                     listen_mask &= ~( NFA_DM_DISC_MASK_LA_T1T
@@ -1046,6 +1234,7 @@ void nfa_dm_start_rf_discover (void)
                                      |NFA_DM_DISC_MASK_LA_ISO_DEP
                                      |NFA_DM_DISC_MASK_LA_NFC_DEP );
                 }
+                NFA_TRACE_DEBUG1 ("listen_mask value after T1T and T2T = 0x%x", listen_mask);
 
                 /* T1T/T2T has priority on NFC-A */
                 if (  (dm_disc_mask & (NFA_DM_DISC_MASK_LA_ISO_DEP|NFA_DM_DISC_MASK_LA_NFC_DEP))
@@ -1064,6 +1253,8 @@ void nfa_dm_start_rf_discover (void)
                                      |NFA_DM_DISC_MASK_LAA_NFC_DEP );
                 }
 
+                NFA_TRACE_DEBUG1 ("listen_mask value after NFC-DEP = 0x%x", listen_mask);
+
                 nfa_dm_cb.disc_cb.entry[xx].selected_disc_mask = poll_mask | listen_mask;
 
                 NFA_TRACE_DEBUG2 ("nfa_dm_cb.disc_cb.entry[%d].selected_disc_mask = 0x%x",
@@ -1072,6 +1263,33 @@ void nfa_dm_start_rf_discover (void)
                 dm_disc_mask |= nfa_dm_cb.disc_cb.entry[xx].selected_disc_mask;
             }
         }
+
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+        if((GetNumValue(NAME_NXP_FWD_FUNCTIONALITY_ENABLE, &fwdEnable, sizeof(fwdEnable))) == FALSE)
+        {
+            fwdEnable = TRUE; //default value
+        }
+        if ((GetNumValue(NAME_HOST_LISTEN_ENABLE, &hostEnable, sizeof(hostEnable))) == FALSE)
+        {
+            hostEnable = TRUE;
+            NFA_TRACE_DEBUG2 ("%s:HOST_LISTEN_ENABLE=0x0%lu;", __FUNCTION__, hostEnable);
+        }
+
+        tech_list = nfa_ee_get_supported_tech_list(0x02);
+        if((fwdEnable == FALSE) || (hostEnable == FALSE))
+        {
+            if(tech_list == NFA_TECHNOLOGY_MASK_B)
+            {
+                NFA_TRACE_DEBUG0 ("TypeB only sim handling in case of no FWD functionality");
+                dm_disc_mask &= ~(NFA_DM_DISC_MASK_LA_ISO_DEP | NFA_DM_DISC_MASK_LA_NFC_DEP);
+            }
+            else if(tech_list == NFA_TECHNOLOGY_MASK_A)
+            {
+                NFA_TRACE_DEBUG0 ("TypeA only sim handling in case of no FWD functionality");
+                dm_disc_mask &= ~(NFA_DM_DISC_MASK_LB_ISO_DEP);
+            }
+        }
+#endif
 
         /* Let P2P set GEN bytes for LLCP to NFCC */
         if (dm_disc_mask & NFA_DM_DISC_MASK_NFC_DEP)
@@ -1277,6 +1495,41 @@ static tNFA_STATUS nfa_dm_disc_notify_activation (tNFC_DISCOVER *p_data)
         return (NFA_STATUS_FAILED);
     }
 
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    /*
+     * if this is Proprietary RF interface, notify activation as START_READER_EVT.
+     *
+     * Code to handle the Reader over SWP.
+     * 1. Pass this info to JNI as START_READER_EVT.
+     * return (NFA_STATUS_OK)
+     */
+    if (p_data->activate.intf_param.type  == NCI_INTERFACE_UICC_DIRECT || p_data->activate.intf_param.type == NCI_INTERFACE_ESE_DIRECT)
+    {
+        for (xx = 0; xx < NFA_DM_DISC_NUM_ENTRIES; xx++)
+        {
+            if ((nfa_dm_cb.disc_cb.entry[xx].in_use)
+#if (NFC_NXP_NOT_OPEN_INCLUDED != TRUE)
+                &&(nfa_dm_cb.disc_cb.entry[xx].host_id != NFA_DM_DISC_HOST_ID_DH)
+#endif
+               )
+            {
+                nfa_dm_cb.disc_cb.activated_rf_interface = p_data->activate.intf_param.type;
+                nfa_dm_cb.disc_cb.activated_handle       = xx;
+
+                NFA_TRACE_DEBUG2 ("activated_rf_uicc-ese_interface:0x%x, activated_handle: 0x%x",
+                                   nfa_dm_cb.disc_cb.activated_rf_interface,
+                                   nfa_dm_cb.disc_cb.activated_handle);
+
+                if (nfa_dm_cb.disc_cb.entry[xx].p_disc_cback)
+                    (*(nfa_dm_cb.disc_cb.entry[xx].p_disc_cback)) (NFA_DM_RF_DISC_ACTIVATED_EVT, p_data);
+
+                return (NFA_STATUS_OK);
+            }
+        }
+        return (NFA_STATUS_FAILED);
+    }
+#endif
+
     /* get bit mask of technolgies/mode and protocol */
     activated_disc_mask = nfa_dm_disc_get_disc_mask (tech_n_mode, protocol);
 
@@ -1316,7 +1569,9 @@ static tNFA_STATUS nfa_dm_disc_notify_activation (tNFC_DISCOVER *p_data)
             if (nfa_dm_cb.disc_cb.entry[xx].host_id == host_id_in_LRT)
             {
                 if (nfa_dm_cb.disc_cb.entry[xx].selected_disc_mask & activated_disc_mask)
+                {
                     break;
+                }
             }
             else
             {
@@ -1352,6 +1607,28 @@ static tNFA_STATUS nfa_dm_disc_notify_activation (tNFC_DISCOVER *p_data)
         /* if any ISO-DEP or T3T listening even if host in LRT is not matched */
         xx = iso_dep_t3t__listen;
     }
+
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+    if(protocol == NFC_PROTOCOL_NFC_DEP &&
+            (tech_n_mode == NFC_DISCOVERY_TYPE_LISTEN_F_ACTIVE ||
+                    tech_n_mode == NFC_DISCOVERY_TYPE_LISTEN_A_ACTIVE ||
+                    tech_n_mode == NFC_DISCOVERY_TYPE_LISTEN_A
+                    )
+      )
+    {
+        if(appl_dta_mode_flag == 1 &&
+          (tech_n_mode == NFC_DISCOVERY_TYPE_LISTEN_A))
+        {
+            NFA_TRACE_DEBUG0("DTA Mode Enabled : NFC-A Passive Mode Listen Mode Workaround");
+        }
+        else
+        {
+            extern tNFA_P2P_CB nfa_p2p_cb;
+            xx = nfa_p2p_cb.dm_disc_handle;
+        }
+    }
+
+#endif
 
     if (xx < NFA_DM_DISC_NUM_ENTRIES)
     {
@@ -1896,6 +2173,7 @@ static void nfa_dm_disc_sm_idle (tNFA_DM_RF_DISC_SM_EVENT event,
             }
             /* Otherwise, deactivating when getting unexpected activation */
         }
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
         else if (p_data->nfc_discover.status == NCI_STATUS_SEMANTIC_ERROR)
         {
             /* check any pending flags like NFA_DM_DISC_FLAGS_STOPPING or NFA_DM_DISC_FLAGS_DISABLING */
@@ -1903,6 +2181,7 @@ static void nfa_dm_disc_sm_idle (tNFA_DM_RF_DISC_SM_EVENT event,
             /* check if need to restart discovery after resync discovery state with NFCC */
             nfa_dm_start_rf_discover ();
         }
+#endif
         /* Otherwise, wait for deactivation NTF */
         break;
 
@@ -1983,6 +2262,7 @@ static void nfa_dm_disc_sm_discovery (tNFA_DM_RF_DISC_SM_EVENT event,
         }
         break;
     case NFA_DM_RF_DISCOVER_NTF:
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
         /* Notification Type = NCI_DISCOVER_NTF_LAST_ABORT */
         if (p_data->nfc_discover.result.more == NCI_DISCOVER_NTF_LAST_ABORT)
         {
@@ -1992,8 +2272,11 @@ static void nfa_dm_disc_sm_discovery (tNFA_DM_RF_DISC_SM_EVENT event,
         }
         else
         {
+#endif
             nfa_dm_disc_new_state (NFA_DM_RFST_W4_ALL_DISCOVERIES);
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
         }
+#endif
         nfa_dm_notify_discovery (p_data);
         break;
     case NFA_DM_RF_INTF_ACTIVATED_NTF:
@@ -2009,6 +2292,18 @@ static void nfa_dm_disc_sm_discovery (tNFA_DM_RF_DISC_SM_EVENT event,
             {
                 nfa_dm_disc_new_state (NFA_DM_RFST_LISTEN_ACTIVE);
             }
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+            /*
+             * Handle the Reader over SWP.
+             * Add condition UICC_DIRECT_INTF/ESE_DIRECT_INTF
+             * set new state NFA_DM_RFST_POLL_ACTIVE
+             * */
+            else if (p_data->nfc_discover.activate.intf_param.type == NCI_INTERFACE_UICC_DIRECT ||
+                    p_data->nfc_discover.activate.intf_param.type == NCI_INTERFACE_ESE_DIRECT )
+            {
+                nfa_dm_disc_new_state (NFA_DM_RFST_POLL_ACTIVE);
+            }
+#endif
             else if (p_data->nfc_discover.activate.rf_tech_param.mode & 0x80)
             {
                 /* Listen mode */
@@ -2091,14 +2386,16 @@ static void nfa_dm_disc_sm_w4_all_discoveries (tNFA_DM_RF_DISC_SM_EVENT event,
         nfa_dm_start_rf_discover ();
         break;
     case NFA_DM_RF_DISCOVER_NTF:
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
         if(p_data->nfc_discover.result.protocol == NCI_PROTOCOL_UNKNOWN)
         {
-            /* fix for p2p interop issues */
+            /* fix for p2p interop with Nexus5 */
             NFA_TRACE_DEBUG0("Unknown protocol - Restart Discovery");
             /* after receiving unknown protocol, restart discovery */
             NFC_Deactivate (NFA_DEACTIVATE_TYPE_IDLE);
             return;
         }
+#endif
         /* if deactivate CMD is already sent then ignore discover NTF */
         if (!(nfa_dm_cb.disc_cb.disc_flags & NFA_DM_DISC_FLAGS_W4_RSP))
         {
@@ -2191,6 +2488,7 @@ static void nfa_dm_disc_sm_w4_host_select (tNFA_DM_RF_DISC_SM_EVENT event,
         {
             /* Handle sleep wakeup success: notify RW module of sleep wakeup of tag; if deactivation is pending then deactivate  */
             nfa_dm_disc_end_sleep_wakeup (NFC_STATUS_OK);
+            nfa_rw_set_cback(&(p_data->nfc_discover));
         }
         else if (status == NFA_STATUS_FAILED)
         {
@@ -2234,7 +2532,10 @@ static void nfa_dm_disc_sm_w4_host_select (tNFA_DM_RF_DISC_SM_EVENT event,
         break;
     default:
         NFA_TRACE_ERROR0 ("nfa_dm_disc_sm_w4_host_select (): Unexpected discovery event");
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+        NFA_TRACE_ERROR0 ("nfa_dm_disc_sm_w4_host_select (): Restarted discovery");
         NFC_Deactivate (NFA_DEACTIVATE_TYPE_IDLE);
+#endif
         break;
     }
 
@@ -2267,6 +2568,15 @@ static void nfa_dm_disc_sm_poll_active (tNFA_DM_RF_DISC_SM_EVENT event,
     switch (event)
     {
     case NFA_DM_RF_DEACTIVATE_CMD:
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+        if (nfa_dm_cb.disc_cb.activated_protocol == NCI_PROTOCOL_MIFARE)
+        {
+            nfa_dm_cb.disc_cb.deact_pending = TRUE;
+            nfa_dm_cb.disc_cb.pending_deact_type    = p_data->deactivate_type;
+            status = nfa_dm_send_deactivate_cmd(p_data->deactivate_type);
+            break;
+        }
+#endif
         if (old_sleep_wakeup_flag)
         {
             /* sleep wakeup is already enabled when deactivate cmd is requested,
@@ -2361,12 +2671,14 @@ static void nfa_dm_disc_sm_poll_active (tNFA_DM_RF_DISC_SM_EVENT event,
         break;
 
     case NFA_DM_CORE_INTF_ERROR_NTF:
+#if(NFC_NXP_NOT_OPEN_INCLUDED != TRUE)
         sleep_wakeup_event    = TRUE;
         if (  (!old_sleep_wakeup_flag)
             ||(!nfa_dm_cb.disc_cb.deact_pending)  )
         {
             nfa_dm_send_deactivate_cmd (NFA_DEACTIVATE_TYPE_DISCOVERY);
         }
+#endif
         break;
 
     default:
@@ -2689,6 +3001,7 @@ tNFA_HANDLE nfa_dm_add_rf_discover (tNFA_DM_DISC_TECH_PROTO_MASK disc_mask,
     {
         if (!nfa_dm_cb.disc_cb.entry[xx].in_use)
         {
+            NFA_TRACE_DEBUG2 ("nfa_dm_add_rf_discover () disc_mask=0x%x, xx=%d", disc_mask, xx);
             nfa_dm_cb.disc_cb.entry[xx].in_use              = TRUE;
             nfa_dm_cb.disc_cb.entry[xx].requested_disc_mask = disc_mask;
             nfa_dm_cb.disc_cb.entry[xx].host_id             = host_id;
@@ -2999,6 +3312,7 @@ static char *nfa_dm_disc_event_2_str (UINT8 event)
 }
 #endif /* BT_TRACE_VERBOSE */
 
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
 /*******************************************************************************
 **
 ** Function         P2P_Prio_Logic
@@ -3018,12 +3332,24 @@ BOOLEAN nfa_dm_p2p_prio_logic(UINT8 event, UINT8 *p, UINT8 ntf_rsp)
         NFA_TRACE_DEBUG0("returning from nfa_dm_p2p_prio_logic  Disable p2p_prio_logic");
         return TRUE;
     }
+    if (TRUE == reconnect_in_progress ||
+            TRUE == is_emvco_active)
+    {
+        NFA_TRACE_DEBUG0("returning from nfa_dm_p2p_prio_logic  reconnect_in_progress || is_emvco_active");
+        return TRUE;
+    }
+    if(0x01 == appl_dta_mode_flag)
+    {
+        /*Disable the P2P Prio Logic when DTA is running*/
+        return TRUE;
+    }
     if(event == NCI_MSG_RF_DISCOVER && p2p_prio_logic_data.timer_expired == 1 && ntf_rsp == 1)
     {
         NFA_TRACE_DEBUG0("nfa_dm_p2p_prio_logic starting a timer for next rf intf activated ntf");
+        P2P_PRIO_LOGIC_CLEANUP_TIMEOUT = (nfa_dm_act_get_rf_disc_duration()/10); /*timeout value 50 ms multiplied by 10 for p2p_prio_logic_cleanup*/
+
         nfc_start_quick_timer (&p2p_prio_logic_data.timer_list,
-                        NFC_TTYPE_P2P_PRIO_LOGIC_CLEANUP,
-                        ((UINT32)nfa_dm_act_get_rf_disc_duration() * QUICK_TIMER_TICKS_PER_SEC) / 1000);
+                        NFC_TTYPE_P2P_PRIO_LOGIC_CLEANUP, P2P_PRIO_LOGIC_CLEANUP_TIMEOUT);
         return TRUE;
     }
     if(event == NCI_MSG_RF_INTF_ACTIVATED && p2p_prio_logic_data.timer_expired == 1)
@@ -3049,6 +3375,13 @@ BOOLEAN nfa_dm_p2p_prio_logic(UINT8 event, UINT8 *p, UINT8 ntf_rsp)
             tech_mode     = *p++;
         }
         NFA_TRACE_DEBUG1("nfa_dm_p2p_prio_logic type = 0x%x", type);
+
+
+        if(type == NCI_INTERFACE_UICC_DIRECT || type == NCI_INTERFACE_ESE_DIRECT )
+        {
+             NFA_TRACE_DEBUG0 ("Disable the p2p prio logic RDR_SWP");
+             return TRUE;
+        }
 
         if(event == NCI_MSG_RF_INTF_ACTIVATED && tech_mode >= 0x80)
         {
@@ -3129,8 +3462,7 @@ BOOLEAN nfa_dm_p2p_prio_logic(UINT8 event, UINT8 *p, UINT8 ntf_rsp)
             NFA_TRACE_DEBUG0 ("NFA_DM_RF_DEACTIVATE_NTF");
 
             nfc_start_quick_timer (&p2p_prio_logic_data.timer_list,
-                                   NFC_TTYPE_P2P_PRIO_RESPONSE,
-                                   ((UINT32) 160 * QUICK_TIMER_TICKS_PER_SEC) / 1000 );
+                                   NFC_TTYPE_P2P_PRIO_RESPONSE, P2P_RESUME_POLL_TIMEOUT);
 
             NFA_TRACE_DEBUG0 ("P2P_Start_Timer");
 
@@ -3140,6 +3472,17 @@ BOOLEAN nfa_dm_p2p_prio_logic(UINT8 event, UINT8 *p, UINT8 ntf_rsp)
 
     NFA_TRACE_DEBUG0("returning TRUE");
     return TRUE;
+}
+void NFA_SetReconnectState (BOOLEAN flag)
+{
+    reconnect_in_progress = flag;
+    NFA_TRACE_DEBUG1("NFA_SetReconnectState = 0x%x", reconnect_in_progress);
+}
+
+void NFA_SetEmvCoState (BOOLEAN flag)
+{
+    is_emvco_active = flag;
+    NFA_TRACE_DEBUG1("NFA_SetEmvCoState = 0x%x", is_emvco_active);
 }
 
 /*******************************************************************************
@@ -3178,3 +3521,4 @@ void nfa_dm_p2p_prio_logic_cleanup()
     NFA_TRACE_DEBUG0 (" p2p_prio_logic_cleanup timeout no activated intf notification received ");
     memset(&p2p_prio_logic_data, 0x00, sizeof(nfa_dm_p2p_prio_logic_t));
 }
+#endif

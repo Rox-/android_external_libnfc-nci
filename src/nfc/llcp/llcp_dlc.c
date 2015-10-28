@@ -1497,4 +1497,3 @@ static char *llcp_dlsm_get_event_name (tLLCP_DLC_EVENT event)
     }
 }
 #endif /* (BT_TRACE_VERBOSE == TRUE) */
-

@@ -33,7 +33,6 @@
 #include <phTmlNfc_i2c.h>
 #include <phNfcStatus.h>
 #include <string.h>
-#include "phNxpNciHal_utils.h"
 
 #define CRC_LEN                     2
 #define NORMAL_MODE_HEADER_LEN      3

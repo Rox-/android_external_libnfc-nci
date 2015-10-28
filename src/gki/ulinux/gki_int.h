@@ -76,4 +76,3 @@ GKI_API extern tGKI_CB *gki_cb_ptr;
 #endif
 
 #endif
-

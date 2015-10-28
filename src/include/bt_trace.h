@@ -4833,4 +4833,3 @@ EXPORT_API extern void BTTRC_StackTrace6(tBTTRC_LAYER_ID layer_id,
 
 
 #endif /* BT_TRACE_H */
-

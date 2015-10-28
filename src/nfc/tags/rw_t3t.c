@@ -1749,6 +1749,10 @@ static void rw_t3t_handle_ndef_detect_poll_rsp (tRW_T3T_CB *p_cb, UINT8 nci_stat
             /* Add CHECK opcode to message  */
             UINT8_TO_STREAM (p, T3T_MSG_OPC_CHECK_CMD);
 
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+            /* Update NFCID2 using SENSF_RES */
+            memcpy (p_cb->peer_nfcid2, (p_sensf_res_buf + NCI_SENSF_RES_OFFSET_NFCID2), NCI_NFCID2_LEN);
+#endif
             /* Add IDm to message */
             ARRAY_TO_STREAM (p, p_cb->peer_nfcid2, NCI_NFCID2_LEN);
 

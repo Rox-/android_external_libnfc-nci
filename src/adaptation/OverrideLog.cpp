@@ -15,7 +15,25 @@
  *  limitations under the License.
  *
  ******************************************************************************/
-
+/******************************************************************************
+ *
+ *  The original Work has been changed by NXP Semiconductors.
+ *
+ *  Copyright (C) 2013-2014 NXP Semiconductors
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ ******************************************************************************/
 /******************************************************************************
  *
  *  Override the ALOGD(), ALOGE(), and other logging macros from
@@ -24,7 +42,6 @@
  ******************************************************************************/
 #include "OverrideLog.h"
 #include <cutils/properties.h>
-#include <string.h>
 #include "config.h"
 #include "android_logmsg.h"
 #define LOG_TAG "BrcmNfcJni"
@@ -78,24 +95,20 @@ unsigned char initializeGlobalAppLogLevel ()
     return appl_trace_level;
 }
 
-UINT32 initializeProtocolLogLevel () {
-    UINT32 num = 0;
-    char valueStr [PROPERTY_VALUE_MAX] = {0};
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+/*******************************************************************************
+**
+** Function:        initializeGlobalDtaMode
+**
+** Description:     Initialize and get global DTA mode from .conf
+**
+** Returns:         none:
+**
+*******************************************************************************/
+void initializeGlobalAppDtaMode ()
+{
+    appl_dta_mode_flag = 0x01;
+    ALOGD("%s: DTA Enabled", __FUNCTION__);
 
-    if ( GetNumValue ( NAME_PROTOCOL_TRACE_LEVEL, &num, sizeof ( num ) ) )
-        ScrProtocolTraceFlag = num;
-
-    int len = property_get ("nfc.enable_protocol_log", valueStr, "");
-    if (len > 0)
-    {
-        if (strncmp("0", valueStr, 1) == 0)
-        {
-            ScrProtocolTraceFlag = 0;
-        } else {
-            ScrProtocolTraceFlag = ~0;
-        }
-    }
-
-    return ScrProtocolTraceFlag;
 }
-
+#endif

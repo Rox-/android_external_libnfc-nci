@@ -573,4 +573,3 @@ NFC_API extern UINT8 NFA_P2pSetTraceLevel (UINT8 new_level);
 #endif
 
 #endif /* NFA_P2P_API_H */
-

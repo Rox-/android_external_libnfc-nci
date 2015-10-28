@@ -15,7 +15,6 @@
  *  limitations under the License.
  *
  ******************************************************************************/
-#include <malloc.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <errno.h>
@@ -1290,4 +1289,3 @@ void GKI_shiftup (UINT8 *p_dest, UINT8 *p_src, UINT32 len)
     for (xx = 0; xx < len; xx++)
         *pd++ = *ps++;
 }
-

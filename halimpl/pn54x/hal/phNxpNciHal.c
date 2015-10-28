@@ -448,7 +448,7 @@ int phNxpNciHal_open(nfc_stack_callback_t *p_cback, nfc_stack_data_callback_t *p
     /* Configure hardware link */
     nxpncihal_ctrl.gDrvCfg.nClientId = phDal4Nfc_msgget(0, 0600);
     nxpncihal_ctrl.gDrvCfg.nLinkType = ENUM_LINK_TYPE_I2C;/* For PN54X */
-    tTmlConfig.pDevName = (int8_t *) NXP_NFC_DEVICE;
+    tTmlConfig.pDevName = (int8_t *) "/dev/pn544";
     tOsalConfig.dwCallbackThreadId
     = (uintptr_t) nxpncihal_ctrl.gDrvCfg.nClientId;
     tOsalConfig.pLogFile = NULL;
@@ -537,11 +537,6 @@ init_retry:
     if ((wFwVerRsp & 0x0000FFFF) == wFwVer)
     {
         NXPLOG_NCIHAL_D ("FW uptodate not required");
-        phDnldNfc_ReSetHwDevHandle();
-    }
-    else if (wFwVer != 0 && (wFwVerRsp & 0x0000FFFF) > wFwVer)
-    {
-        NXPLOG_NCIHAL_D ("FW image older than device's, skip update");
         phDnldNfc_ReSetHwDevHandle();
     }
     else

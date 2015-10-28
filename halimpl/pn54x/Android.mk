@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2014 NXP Semiconductors
+# Copyright (C) 2011 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,61 +21,53 @@ $(patsubst ./%,%, \
  )
 endef
 
-ifneq ($(BOARD_NFC_HAL_SUFFIX),)
-    HAL_SUFFIX := pn54x.$(BOARD_NFC_HAL_SUFFIX)
-else
-    HAL_SUFFIX := pn54x.default
-endif
 
-ifeq ($(BOARD_NFC_DEVICE),)
-    NFC_DEVICE := "/dev/pn544"
-else
-    NFC_DEVICE := $(BOARD_NFC_DEVICE)
+HAL_SUFFIX := $(TARGET_DEVICE)
+ifeq ($(TARGET_DEVICE),crespo)
+	HAL_SUFFIX := herring
 endif
 
 LOCAL_PRELINK_MODULE := false
 LOCAL_ARM_MODE := arm
 LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
-LOCAL_MODULE := nfc_nci.$(HAL_SUFFIX)
-LOCAL_MODULE_RELATIVE_PATH := hw
+LOCAL_MODULE := nfc_nci.pn54x.default
+LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_SRC_FILES := $(call all-c-files-under, .)  $(call all-cpp-files-under, .)
-LOCAL_SHARED_LIBRARIES := liblog libcutils libhardware_legacy libdl libstlport libhardware
+LOCAL_SHARED_LIBRARIES := liblog libcutils libhardware_legacy libdl libstlport
 LOCAL_MODULE_TAGS := optional
 
 LOCAL_C_INCLUDES += external/stlport/stlport  bionic/  bionic/libstdc++/include \
-    $(LOCAL_PATH)/utils \
-    $(LOCAL_PATH)/inc \
-    $(LOCAL_PATH)/common \
-    $(LOCAL_PATH)/dnld \
-    $(LOCAL_PATH)/hal \
-    $(LOCAL_PATH)/log \
-    $(LOCAL_PATH)/tml \
-    $(LOCAL_PATH)/self-test
+	$(LOCAL_PATH)/utils \
+	$(LOCAL_PATH)/inc \
+	$(LOCAL_PATH)/common \
+	$(LOCAL_PATH)/dnld \
+	$(LOCAL_PATH)/hal \
+	$(LOCAL_PATH)/log \
+	$(LOCAL_PATH)/tml \
+	$(LOCAL_PATH)/self-test
 
 #variables for NFC_NXP_CHIP_TYPE
 PN547C2 := 1
 PN548C2 := 2
-
+PN551C2 := 3
+#NXP PN547 Enable
 ifeq ($(PN547C2),1)
 LOCAL_CFLAGS += -DPN547C2=1
 endif
 ifeq ($(PN548C2),2)
 LOCAL_CFLAGS += -DPN548C2=2
 endif
+ifeq ($(PN551C2),3)
+LOCAL_CFLAGS += -DPN551C2=3
+endif
 
 #### Select the CHIP ####
-ifeq ($(BOARD_NFC_CHIPSET),pn547)
-    LOCAL_CFLAGS += -DNFC_NXP_CHIP_TYPE=PN547C2
-else
-    LOCAL_CFLAGS += -DNFC_NXP_CHIP_TYPE=PN548C2
-endif
+LOCAL_CFLAGS += -DNFC_NXP_CHIP_TYPE=PN547C2
 
 LOCAL_CFLAGS += -DANDROID \
         -DNXP_UICC_ENABLE -DNXP_HW_SELF_TEST
 LOCAL_CFLAGS += -DNFC_NXP_HFO_SETTINGS=FALSE
 #LOCAL_CFLAGS += -DFELICA_CLT_ENABLE
-
-LOCAL_CFLAGS += -DNXP_NFC_DEVICE="\"$(NFC_DEVICE)\""
-
+#-DNXP_PN547C1_DOWNLOAD
 include $(BUILD_SHARED_LIBRARY)

@@ -16,6 +16,25 @@
  *
  ******************************************************************************/
 
+/******************************************************************************
+ *
+ *  The original Work has been changed by NXP Semiconductors.
+ *
+ *  Copyright (C) 2013-2014 NXP Semiconductors
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ ******************************************************************************/
 
 /******************************************************************************
  *
@@ -131,6 +150,22 @@ void nfc_process_timer_evt (void)
         case NFC_TTYPE_WAIT_2_DEACTIVATE:
             nfc_wait_2_deactivate_timeout ();
             break;
+        case NFC_TTYPE_NCI_WAIT_DATA_NTF:
+        {
+            nfc_cb.i2c_data_t.nci_cmd_channel_busy = 0;
+            nfc_cb.i2c_data_t.data_stored = 0;
+            nfc_ncif_credit_ntf_timeout();
+            break;
+        }
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
+        case NFC_TTYPE_LISTEN_ACTIVATION:
+            {
+                extern uint8_t sListenActivated;
+                sListenActivated = FALSE;
+                nfc_ncif_cmd_timeout();
+            }
+            break;
+#endif
 
         default:
             NFC_TRACE_DEBUG2 ("nfc_process_timer_evt: timer:0x%x event (0x%04x)", p_tle, p_tle->event);
@@ -278,12 +313,14 @@ void nfc_process_quick_timer_evt (void)
         case NFC_TTYPE_RW_I93_RESPONSE:
             rw_i93_process_timeout (p_tle);
             break;
+#if(NFC_NXP_NOT_OPEN_INCLUDED == TRUE)
         case NFC_TTYPE_P2P_PRIO_RESPONSE:
             nfa_dm_p2p_timer_event ();
             break;
         case NFC_TTYPE_P2P_PRIO_LOGIC_CLEANUP:
             nfa_dm_p2p_prio_logic_cleanup();
             break;
+#endif
 #if (NFC_RW_ONLY == FALSE)
         case NFC_TTYPE_CE_T4T_UPDATE:
             ce_t4t_process_timeout (p_tle);
